@@ -5,7 +5,7 @@ export class TradeManager {
   constructor(nadoClient, notifier) {
     this.nado = nadoClient;
     this.notifier = notifier;
-    this.openPositions = new Map(); // orderId -> position data
+    this.openPositions = new Map(); // digest -> position data
     this.dailyTrades = 0;
     this.lastResetDate = new Date().toDateString();
   }
@@ -71,7 +71,16 @@ export class TradeManager {
       
       // Calculate position size
       const positionSize = this.calculatePositionSize(availableUSDT);
-      const entryPrice = signal.stats?.lastPrice || product.lastPrice;
+      
+      // Get current market price from product
+      const entryPrice = product.mark_price_x18 
+        ? this.nado.fromX18(product.mark_price_x18) 
+        : signal.stats?.lastPrice || 0;
+      
+      if (!entryPrice) {
+        logger.error('Cannot determine entry price');
+        return;
+      }
       
       // Calculate TP and SL prices
       const tpPrice = side === 'LONG'
@@ -84,31 +93,35 @@ export class TradeManager {
       
       // Place market order for entry
       const amount = side === 'LONG' ? positionSize : -positionSize;
-      const entryOrder = await this.placeMarketOrder(product.id, amount);
+      const entryOrder = await this.placeMarketOrder(product.product_id, amount, entryPrice);
       
-      if (!entryOrder) {
+      if (!entryOrder || !entryOrder.digest) {
         logger.error('Failed to place entry order');
         return;
       }
       
       // Store position data
       const position = {
-        orderId: entryOrder.id,
+        digest: entryOrder.digest,
         symbol,
         side,
         entryPrice,
         size: positionSize,
         tpPrice,
         slPrice,
-        productId: product.id,
+        productId: product.product_id,
         openTime: Date.now(),
+        tpOrderDigest: null,
+        slOrderDigest: null,
       };
       
-      this.openPositions.set(entryOrder.id, position);
+      this.openPositions.set(entryOrder.digest, position);
       this.dailyTrades++;
       
-      // Place TP and SL limit orders
-      await this.placeTpSlOrders(position);
+      // Place TP and SL limit orders after entry
+      setTimeout(async () => {
+        await this.placeTpSlOrders(position);
+      }, 2000); // Wait 2s for entry to fill
       
       // Send notification
       await this.notifier.sendTradeOpen(position, availableUSDT);
@@ -126,22 +139,13 @@ export class TradeManager {
   }
   
   /**
-   * Place market order (simplified - uses limit order at best price)
+   * Place market order (uses limit with aggressive pricing)
    */
-  async placeMarketOrder(productId, amount) {
+  async placeMarketOrder(productId, amount, currentPrice) {
     try {
-      // For market execution, we use a limit order with a price that will execute immediately
-      // Get current market price and add/subtract slippage tolerance
-      const products = await this.nado.getProducts();
-      const product = products.find(p => p.id === productId);
-      
-      if (!product) {
-        throw new Error('Product not found');
-      }
-      
       const isLong = amount > 0;
-      const slippageFactor = isLong ? 1.002 : 0.998; // 0.2% slippage tolerance
-      const executionPrice = product.lastPrice * slippageFactor;
+      // Add 0.2% slippage tolerance for market execution
+      const executionPrice = isLong ? currentPrice * 1.002 : currentPrice * 0.998;
       
       const priceX18 = this.nado.toX18(executionPrice);
       const amountX18 = this.nado.toX18(amount);
@@ -167,7 +171,9 @@ export class TradeManager {
       const tpAmountX18 = this.nado.toX18(tpAmount);
       
       const tpOrder = await this.nado.placeOrder(productId, tpPriceX18, tpAmountX18);
-      position.tpOrderId = tpOrder?.id;
+      if (tpOrder) {
+        position.tpOrderDigest = tpOrder.digest;
+      }
       
       // SL order (opposite side)
       const slAmount = side === 'LONG' ? -size : size;
@@ -175,7 +181,9 @@ export class TradeManager {
       const slAmountX18 = this.nado.toX18(slAmount);
       
       const slOrder = await this.nado.placeOrder(productId, slPriceX18, slAmountX18);
-      position.slOrderId = slOrder?.id;
+      if (slOrder) {
+        position.slOrderDigest = slOrder.digest;
+      }
       
       logger.info(`TP/SL orders placed for ${position.symbol}`);
       
@@ -185,28 +193,38 @@ export class TradeManager {
   }
   
   /**
-   * Handle order fill events from WebSocket
+   * Handle order update events from WebSocket
    */
-  async handleOrderFill(data) {
-    const { orderId, price, amount } = data;
-    
-    // Check if this is a TP or SL execution
-    for (const [entryOrderId, position] of this.openPositions.entries()) {
-      if (orderId === position.tpOrderId) {
-        await this.closePosition(position, 'TP', price);
-        return;
+  async handleOrderUpdate(data) {
+    try {
+      const { digest, status, fill_price_x18 } = data;
+      
+      if (status !== 'filled') {
+        return; // Only process filled orders
       }
       
-      if (orderId === position.slOrderId) {
-        await this.closePosition(position, 'SL', price);
-        return;
+      const fillPrice = fill_price_x18 ? this.nado.fromX18(fill_price_x18) : null;
+      
+      // Check if this is a TP or SL execution
+      for (const [entryDigest, position] of this.openPositions.entries()) {
+        if (digest === position.tpOrderDigest) {
+          await this.closePosition(position, 'TP', fillPrice);
+          return;
+        }
+        
+        if (digest === position.slOrderDigest) {
+          await this.closePosition(position, 'SL', fillPrice);
+          return;
+        }
       }
+    } catch (error) {
+      logger.error('Order update handling error:', error);
     }
   }
   
   async closePosition(position, reason, exitPrice) {
     try {
-      const { symbol, side, entryPrice, size } = position;
+      const { symbol, side, entryPrice, size, productId } = position;
       
       // Calculate PnL
       const pnlPercent = side === 'LONG'
@@ -216,14 +234,14 @@ export class TradeManager {
       const pnlUSD = (size * pnlPercent / 100);
       
       // Cancel remaining order (TP or SL)
-      if (reason === 'TP' && position.slOrderId) {
-        await this.nado.cancelOrder(position.slOrderId).catch(() => {});
-      } else if (reason === 'SL' && position.tpOrderId) {
-        await this.nado.cancelOrder(position.tpOrderId).catch(() => {});
+      if (reason === 'TP' && position.slOrderDigest) {
+        await this.nado.cancelOrder(productId, position.slOrderDigest).catch(() => {});
+      } else if (reason === 'SL' && position.tpOrderDigest) {
+        await this.nado.cancelOrder(productId, position.tpOrderDigest).catch(() => {});
       }
       
       // Remove from open positions
-      this.openPositions.delete(position.orderId);
+      this.openPositions.delete(position.digest);
       
       // Get updated balance
       const balance = await this.nado.getSubaccountBalance();

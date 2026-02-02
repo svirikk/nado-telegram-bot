@@ -1,12 +1,10 @@
-import { config } from './config.js';
-
 const LOG_LEVELS = {
   error: 0,
   info: 1,
   debug: 2,
 };
 
-const currentLevel = LOG_LEVELS[config.logLevel] || LOG_LEVELS.info;
+const currentLevel = LOG_LEVELS[process.env.LOG_LEVEL] || LOG_LEVELS.info;
 
 function formatTimestamp() {
   return new Date().toISOString();

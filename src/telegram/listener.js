@@ -44,8 +44,6 @@ export class TelegramListener {
         return;
       }
       
-      logger.debug('Signal message received');
-      
       // Parse the signal
       const signal = this.parseSignal(text);
       
@@ -56,13 +54,11 @@ export class TelegramListener {
       
       // Validate signal
       if (!this.validateSignal(signal)) {
-        logger.info(`Signal ignored: ${signal.symbol} (validation failed)`);
         return;
       }
       
       // Check trading hours
       if (!TradingHours.isWithinTradingHours()) {
-        logger.info('Signal ignored: outside trading hours');
         return;
       }
       
@@ -117,14 +113,12 @@ export class TelegramListener {
   validateSignal(signal) {
     // Check if symbol is in whitelist
     if (!config.allowedSymbols.includes(signal.symbol)) {
-      logger.debug(`Symbol ${signal.symbol} not in whitelist`);
       return false;
     }
     
     // Check if signal type is valid
     const validTypes = ['SHORT_SQUEEZE', 'LONG_FLUSH'];
     if (!validTypes.includes(signal.signalType)) {
-      logger.debug(`Invalid signal type: ${signal.signalType}`);
       return false;
     }
     

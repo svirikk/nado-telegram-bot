@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 
 export class TelegramNotifier {
   constructor() {
-    this.bot = new TelegramBot(config.telegram.botToken, { polling: false });
+    this.bot = new TelegramBot(config.telegram.botToken, { polling: true });
     this.chatId = config.telegram.notifyChatId;
   }
   

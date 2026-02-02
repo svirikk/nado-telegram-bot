@@ -5,7 +5,12 @@ import { TradingHours } from '../utils/tradingHours.js';
 
 export class TelegramListener {
   constructor(tradeManager) {
-    this.bot = new TelegramBot(config.telegram.botToken, { polling: true });
+    this.bot = new TelegramBot(config.telegram.botToken, { 
+      polling: {
+        interval: 1000,
+        autoStart: true,
+      }
+    });
     this.tradeManager = tradeManager;
     this.channelId = config.telegram.channelId;
     
@@ -13,9 +18,11 @@ export class TelegramListener {
   }
   
   setupListeners() {
+    // Handle all messages including channel posts
     this.bot.on('message', (msg) => this.handleMessage(msg));
     this.bot.on('channel_post', (msg) => this.handleMessage(msg));
     
+    // Handle polling errors
     this.bot.on('polling_error', (error) => {
       logger.error('Telegram polling error:', error);
     });

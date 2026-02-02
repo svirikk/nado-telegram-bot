@@ -23,12 +23,10 @@ export class TradeManager {
     this.resetDailyCounterIfNeeded();
     
     if (this.dailyTrades >= config.risk.maxDailyTrades) {
-      logger.info('Max daily trades reached');
       return false;
     }
     
     if (this.openPositions.size >= config.risk.maxOpenPositions) {
-      logger.info('Max open positions reached');
       return false;
     }
     

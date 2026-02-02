@@ -1,5 +1,5 @@
 import { createNadoClient } from '@nadohq/client';
-import { createWalletClient, createPublicClient, http } from 'viem';
+import { createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arbitrum, arbitrumSepolia } from 'viem/chains';
 import { config } from '../config.js';
@@ -27,23 +27,16 @@ export class NadoClient {
       const network = config.nado.network || 'mainnet';
       const chain = network === 'testnet' ? arbitrumSepolia : arbitrum;
       
-      // Create viem wallet and public clients
+      // Create viem wallet client
       const walletClient = createWalletClient({
         account,
         chain,
         transport: http(),
       });
       
-      const publicClient = createPublicClient({
-        chain,
-        transport: http(),
-      });
-      
-      // Create Nado client using official SDK with correct parameter names
-      this.client = await createNadoClient(network, {
-        signer: walletClient,
-        querier: publicClient,
-      });
+      // Create Nado client using official SDK
+      // SDK accepts only walletClient as second parameter
+      this.client = await createNadoClient(network, walletClient);
       
       logger.info(`Nado client initialized (${network})`);
       

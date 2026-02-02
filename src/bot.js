@@ -4,7 +4,6 @@ import { TelegramListener } from './telegram/listener.js';
 import { TelegramNotifier } from './telegram/notifier.js';
 import { TradingHours } from './utils/tradingHours.js';
 import { logger } from './utils/logger.js';
-import { config } from './config.js';
 
 export class TradingBot {
   constructor() {
@@ -19,11 +18,12 @@ export class TradingBot {
     try {
       logger.info('Starting Nado Trading Bot...');
       
-      // Initialize Nado client
+      // Initialize Nado client with SDK
       this.nado = new NadoClient();
+      await this.nado.initialize();
       logger.info('Nado client initialized');
       
-      // Connect WebSocket
+      // Connect WebSocket (handled by SDK internally)
       await this.nado.connectWebSocket();
       
       // Initialize notifier
@@ -37,9 +37,9 @@ export class TradingBot {
       this.tradeManager = new TradeManager(this.nado, this.notifier);
       logger.info('Trade manager initialized');
       
-      // Subscribe to order fill events
-      this.nado.subscribe('order_fill', (data) => {
-        this.tradeManager.handleOrderFill(data);
+      // Subscribe to order updates
+      this.nado.subscribe('order_update', (data) => {
+        this.tradeManager.handleOrderUpdate(data);
       });
       
       // Initialize Telegram listener
@@ -51,7 +51,7 @@ export class TradingBot {
       const tradingHoursStatus = TradingHours.getStatusMessage();
       
       await this.notifier.sendStartup(
-        this.nado.signer.getAddress(),
+        this.nado.getAddress(),
         availableUSDT,
         tradingHoursStatus
       );
@@ -110,11 +110,7 @@ export class TradingBot {
   async sendDailySummary() {
     try {
       const stats = this.tradeManager.getDailyStats();
-      
-      // Calculate total PnL (simplified - would need to track all closed positions)
-      // For now, just send the stats
       await this.notifier.sendDailySummary(stats, 0);
-      
     } catch (error) {
       logger.error('Failed to send daily summary:', error);
     }
@@ -125,10 +121,6 @@ export class TradingBot {
     
     if (this.telegramListener) {
       this.telegramListener.stop();
-    }
-    
-    if (this.nado && this.nado.ws) {
-      this.nado.ws.close();
     }
     
     this.isRunning = false;

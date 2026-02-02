@@ -9,7 +9,7 @@ function getEnv(key, defaultValue = null, required = true) {
   return value;
 }
 
-function parseFloat(str, defaultValue) {
+function parseFloatSafe(str, defaultValue) {
   const num = Number(str);
   return isNaN(num) ? defaultValue : num;
 }
@@ -33,17 +33,16 @@ export const config = {
   
   // Nado API
   nado: {
-    restApi: getEnv('NADO_REST_API', 'https://api.nado.xyz'),
-    wsUrl: getEnv('NADO_WS_URL', 'wss://api.nado.xyz/ws'),
+    network: getEnv('NADO_NETWORK', 'mainnet', false), // mainnet or testnet
     subaccount: getEnv('SUBACCOUNT', 'default', false),
   },
   
   // Risk Management
   risk: {
-    riskPercent: parseFloat(getEnv('RISK_PERCENT', '2.5'), 2.5),
-    takeProfitPercent: parseFloat(getEnv('TAKE_PROFIT_PERCENT', '0.8'), 0.8),
-    stopLossPercent: parseFloat(getEnv('STOP_LOSS_PERCENT', '0.3'), 0.3),
-    leverage: parseFloat(getEnv('LEVERAGE', '20'), 20),
+    riskPercent: parseFloatSafe(getEnv('RISK_PERCENT', '2.5'), 2.5),
+    takeProfitPercent: parseFloatSafe(getEnv('TAKE_PROFIT_PERCENT', '0.8'), 0.8),
+    stopLossPercent: parseFloatSafe(getEnv('STOP_LOSS_PERCENT', '0.3'), 0.3),
+    leverage: parseFloatSafe(getEnv('LEVERAGE', '20'), 20),
     maxDailyTrades: parseInt(getEnv('MAX_DAILY_TRADES', '5'), 10),
     maxOpenPositions: parseInt(getEnv('MAX_OPEN_POSITIONS', '1'), 10),
   },

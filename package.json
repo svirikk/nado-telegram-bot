@@ -1,0 +1,23 @@
+{
+  "name": "nado-telegram-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Autonomous Nado trading bot driven by Telegram signals",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ethers": "^6.10.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "ws": "^8.16.0",
+    "dotenv": "^16.4.1"
+  },
+  "keywords": ["trading", "nado", "telegram", "bot", "crypto"],
+  "author": "",
+  "license": "MIT"
+}

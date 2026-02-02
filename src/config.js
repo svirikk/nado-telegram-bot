@@ -21,8 +21,10 @@ function parseBool(str, defaultValue) {
 }
 
 export const config = {
-  // Wallet
-  privateKey: getEnv('PRIVATE_KEY'),
+  // Wallet - automatically add 0x prefix if missing
+  privateKey: getEnv('PRIVATE_KEY').startsWith('0x') 
+    ? getEnv('PRIVATE_KEY') 
+    : '0x' + getEnv('PRIVATE_KEY'),
   
   // Telegram
   telegram: {
@@ -33,7 +35,8 @@ export const config = {
   
   // Nado API
   nado: {
-    network: getEnv('NADO_NETWORK', 'mainnet', false), // mainnet or testnet
+    restApi: getEnv('NADO_REST_API', 'https://api.nado.xyz', false),
+    wsUrl: getEnv('NADO_WS_URL', 'wss://api.nado.xyz/ws', false),
     subaccount: getEnv('SUBACCOUNT', 'default', false),
   },
   
@@ -65,8 +68,9 @@ export const config = {
 };
 
 // Validate configuration
-if (!config.privateKey.startsWith('0x') || config.privateKey.length !== 66) {
-  throw new Error('PRIVATE_KEY must be a valid hex string starting with 0x');
+const keyLength = config.privateKey.length;
+if (!config.privateKey.startsWith('0x') || (keyLength !== 66 && keyLength !== 64)) {
+  throw new Error(`PRIVATE_KEY invalid: expected 64 hex chars (or 66 with 0x), got ${keyLength} chars`);
 }
 
 if (config.risk.riskPercent <= 0 || config.risk.riskPercent > 100) {

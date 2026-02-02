@@ -14,12 +14,18 @@ export class NadoClient {
   
   async initialize() {
     try {
+      // Ensure private key has 0x prefix for viem
+      const privateKey = config.privateKey.startsWith('0x') 
+        ? config.privateKey 
+        : `0x${config.privateKey}`;
+      
       // Create viem account from private key
-      const account = privateKeyToAccount(config.privateKey);
+      const account = privateKeyToAccount(privateKey);
       this.address = account.address;
       
-      // Determine chain based on network config
-      const chain = config.nado.network === 'testnet' ? arbitrumSepolia : arbitrum;
+      // Determine network - default to mainnet if not specified
+      const network = config.nado.network || 'mainnet';
+      const chain = network === 'testnet' ? arbitrumSepolia : arbitrum;
       
       // Create viem wallet and public clients
       const walletClient = createWalletClient({
@@ -33,13 +39,13 @@ export class NadoClient {
         transport: http(),
       });
       
-      // Create Nado client using official SDK
-      this.client = await createNadoClient(config.nado.network, {
-        walletClient,
-        publicClient,
+      // Create Nado client using official SDK with correct parameter names
+      this.client = await createNadoClient(network, {
+        signer: walletClient,
+        querier: publicClient,
       });
       
-      logger.info(`Nado client initialized (${config.nado.network})`);
+      logger.info(`Nado client initialized (${network})`);
       
     } catch (error) {
       logger.error('Failed to initialize Nado client:', error);

@@ -69,32 +69,42 @@ export class NadoClient {
   
   async getSubaccountBalance() {
     try {
-      // SDK needs owner address, not subaccount name
+      if (!this.address) {
+        logger.error('Wallet address not initialized yet');
+        return { USDT0: 0 };
+      }
+
+      // 1. Беремо назву з конфігурації. Якщо там пусто - пробуємо 'default'
+      // Це дозволить тобі змінити назву в .env файлі без зміни коду!
+      const subName = config.nado.subaccount || 'default';
+
+      logger.info(`Checking balance for Owner: ${this.address}, Subaccount ID: "${subName}"`);
+
+      // 2. Передаємо і власника, і правильну назву
       const summary = await this.client.subaccount.getSubaccountSummary({
         owner: this.address,
-        name: 'default'
+        name: subName 
       });
       
-      if (!summary || !summary.exists) {
-        logger.info('Subaccount does not exist yet - need to make first deposit');
+      if (!summary) {
+        logger.info(`Subaccount "${subName}" not found or empty response`);
         return { USDT0: 0 };
       }
       
-      // Convert to format expected by existing code
       const balances = {};
       
-      // Get USDT0 balance (product_id 0)
       if (summary.health && summary.health.totalDeposited) {
-        balances.USDT0 = parseFloat(summary.health.totalDeposited);
+        balances.USDT0 = Number(summary.health.totalDeposited) / 1e18;
       } else {
         balances.USDT0 = 0;
       }
       
+      logger.info(`✅ Balance for "${subName}": $${balances.USDT0.toFixed(2)}`);
       return balances;
       
     } catch (error) {
-      logger.error('Failed to get balance:', error);
-      return { USDT0: 0 }; // Return default to avoid crash
+      logger.error('Failed to get Nado balance:', error);
+      return { USDT0: 0 }; 
     }
   }
   

@@ -69,55 +69,57 @@ export class NadoClient {
   
   async getSubaccountBalance() {
     try {
-      // 1. Беремо назву з конфігу (залиш default, якщо в Nado написано default)
+      if (!this.address) return { USDT0: 0 };
+
+      // ГЕК: Імпортуємо утиліту перетворення прямо всередині або на початку файлу
+      const { decodeHex } = await import('viem');
+
       const subName = config.nado.subaccount || 'default';
       
-      // 2. ВАЖЛИВО: Очищуємо адресу. Деякі версії SDK глючать, 
-      // якщо адреса приходить як об'єкт або має дивні символи.
-      const ownerAddress = String(this.address).toLowerCase().trim();
+      // ПОМИЛКА БУЛА ТУТ: SDK хоче бачити 20 байт, а не 42 символи тексту.
+      // Ми перетворюємо "0x5662..." на реальні 20 байт даних.
+      const ownerBuffer = decodeHex(this.address);
 
-      logger.info(`Checking balance for: ${ownerAddress} | Sub-ID: ${subName}`);
+      logger.info(`Checking balance for: ${this.address} (Converted to 20 bytes)`);
 
-      // 3. Виклик з явним приведенням типів
       const summary = await this.client.subaccount.getSubaccountSummary({
-        owner: ownerAddress,
+        owner: ownerBuffer, // ТЕПЕР ПЕРЕДАЄМО БАЙТИ
         name: subName
       });
       
       if (!summary || !summary.health) {
-        logger.info(`No data for subaccount "${subName}". Is deposit done?`);
+        logger.info(`No summary for "${subName}". Check if you made a deposit in NADO interface.`);
         return { USDT0: 0 };
       }
       
-      // Розрахунок балансу (враховуємо 18 знаків)
-      const rawBalance = summary.health.totalDeposited || 0;
-      const formattedBalance = Number(rawBalance) / 1e18;
+      const balance = Number(summary.health.totalDeposited) / 1e18;
+      logger.info(`✅ Success! Balance: $${balance.toFixed(2)} USDT0`);
       
-      logger.info(`✅ Success! Nado Internal Balance: $${formattedBalance.toFixed(2)}`);
-      return { USDT0: formattedBalance };
+      return { USDT0: balance };
       
     } catch (error) {
-      // Якщо знову вилетить "owner must be 20 bytes", спробуємо останній шанс:
-      if (error.message.includes('20 bytes')) {
-        logger.error('CRITICAL: SDK still rejects the address format.');
-        // Спробуй цей хак, якщо звичайний виклик не працює:
-        return this._backupGetBalance(); 
-      }
-      logger.error('Failed to get Nado balance:', error);
-      return { USDT0: 0 }; 
+      logger.error('SDK Error details:', error);
+      
+      // ПЛАН "Б": Якщо SDK все одно тупить, ми витягнемо баланс через загальний список
+      return this._lastResortBalance();
     }
   }
 
-  // Додай цей допоміжний метод нижче для "плану Б"
-  async _backupGetBalance() {
+  // Останній шанс: отримати всі субакаунти і знайти свій
+  async _lastResortBalance() {
     try {
-      // Деякі версії SDK автоматично беруть адресу з walletClient
-      // якщо викликати метод БЕЗ аргументів або тільки з name
-      const summary = await this.client.subaccount.getSubaccountSummary({
-        name: config.nado.subaccount || 'default'
-      });
-      const bal = summary?.health?.totalDeposited ? Number(summary.health.totalDeposited) / 1e18 : 0;
-      return { USDT0: bal };
+      logger.info('Using Last Resort Method...');
+      const subaccounts = await this.client.subaccount.getSubaccounts(this.address);
+      const mySub = subaccounts.find(s => s.name === (config.nado.subaccount || 'default'));
+      
+      if (mySub) {
+        const summary = await this.client.subaccount.getSubaccountSummary({
+          owner: decodeHex(this.address),
+          name: mySub.name
+        });
+        return { USDT0: Number(summary.health.totalDeposited) / 1e18 };
+      }
+      return { USDT0: 0 };
     } catch (e) {
       return { USDT0: 0 };
     }

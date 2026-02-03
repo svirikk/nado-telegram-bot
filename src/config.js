@@ -21,8 +21,10 @@ function parseBool(str, defaultValue) {
 }
 
 export const config = {
-  // Wallet - DO NOT modify the key, use exactly as provided
-  privateKey: getEnv('PRIVATE_KEY'),
+  // Wallet - automatically add 0x prefix if missing
+  privateKey: getEnv('PRIVATE_KEY').startsWith('0x') 
+    ? getEnv('PRIVATE_KEY') 
+    : '0x' + getEnv('PRIVATE_KEY'),
   
   // Telegram
   telegram: {
@@ -31,9 +33,10 @@ export const config = {
     notifyChatId: getEnv('TELEGRAM_NOTIFY_CHAT_ID'),
   },
   
-  // Nado Network
+  // Nado API
   nado: {
-    network: getEnv('NADO_NETWORK', 'mainnet', false),
+    restApi: getEnv('NADO_REST_API', 'https://api.nado.xyz', false),
+    wsUrl: getEnv('NADO_WS_URL', 'wss://api.nado.xyz/ws', false),
     subaccount: getEnv('SUBACCOUNT', 'default', false),
   },
   
@@ -65,14 +68,9 @@ export const config = {
 };
 
 // Validate configuration
-if (!config.privateKey) {
-  throw new Error('PRIVATE_KEY is required');
-}
-
-// Validate key format (should be 64 or 66 chars)
-const keyWithoutPrefix = config.privateKey.replace(/^0x/, '');
-if (keyWithoutPrefix.length !== 64) {
-  throw new Error(`PRIVATE_KEY invalid length: expected 64 hex chars, got ${keyWithoutPrefix.length}`);
+const keyLength = config.privateKey.length;
+if (!config.privateKey.startsWith('0x') || (keyLength !== 66 && keyLength !== 64)) {
+  throw new Error(`PRIVATE_KEY invalid: expected 64 hex chars (or 66 with 0x), got ${keyLength} chars`);
 }
 
 if (config.risk.riskPercent <= 0 || config.risk.riskPercent > 100) {

@@ -1,8 +1,7 @@
 import { createNadoClient } from '@nadohq/client';
 import { createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { arbitrum, arbitrumSepolia } from 'viem/chains';
-import { RpcProvider } from 'starknet';
+import { ink, inkSepolia } from 'viem/chains';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 
@@ -24,9 +23,11 @@ export class NadoClient {
       const account = privateKeyToAccount(privateKey);
       this.address = account.address;
       
-      // Determine network - default to mainnet if not specified
-      const network = config.nado.network || 'mainnet';
-      const chain = network === 'testnet' ? arbitrumSepolia : arbitrum;
+      // Determine network - inkMainnet or inkTestnet
+      const network = config.nado.network || 'inkMainnet';
+      const chain = network === 'inkTestnet' ? inkSepolia : ink;
+      
+      logger.info(`Initializing Nado client on ${network}...`);
       
       // Create viem wallet client
       const walletClient = createWalletClient({
@@ -35,19 +36,10 @@ export class NadoClient {
         transport: http(),
       });
       
-      // Create StarkNet provider (required by SDK)
-      const starknetRpcUrl = network === 'testnet' 
-        ? 'https://starknet-sepolia.public.blastapi.io'
-        : 'https://starknet-mainnet.public.blastapi.io';
+      // Create Nado client using official SDK (only 2 parameters!)
+      this.client = createNadoClient(network, walletClient);
       
-      const starknetProvider = new RpcProvider({ 
-        nodeUrl: starknetRpcUrl 
-      });
-      
-      // Create Nado client using official SDK with all 3 parameters
-      this.client = await createNadoClient(network, walletClient, starknetProvider);
-      
-      logger.info(`Nado client initialized (${network})`);
+      logger.info(`✅ Nado client initialized (${network})`);
       
     } catch (error) {
       logger.error('Failed to initialize Nado client:', error);
@@ -61,16 +53,8 @@ export class NadoClient {
   
   async getProducts() {
     try {
-      // Try SDK method
-      if (this.client.context && this.client.context.engineClient) {
-        const result = await this.client.context.engineClient.getAllProducts();
-        return [...result.spot_products, ...result.perp_products];
-      }
-      
-      // Fallback to direct API call
-      const response = await fetch(`https://api.nado.xyz/v1/products`);
-      const data = await response.json();
-      return data;
+      const result = await this.client.context.engineClient.getAllProducts();
+      return [...result.spot_products, ...result.perp_products];
     } catch (error) {
       logger.error('Failed to get products:', error);
       throw error;
@@ -84,27 +68,26 @@ export class NadoClient {
   
   async getSubaccountBalance() {
     try {
-      const subaccount = this.getSubaccountId();
+      // Use SDK's subaccount.getSubaccountSummary
+      const summary = await this.client.subaccount.getSubaccountSummary('default');
       
-      // Try SDK method
-      if (this.client.context && this.client.context.engineClient) {
-        const balances = await this.client.context.engineClient.getSubaccountInfo(subaccount);
-        
-        // Convert to format expected by existing code
-        const result = {};
-        for (const [productId, balance] of Object.entries(balances.balances || {})) {
-          const product = await this.getProductById(parseInt(productId));
-          if (product) {
-            result[product.symbol] = this.fromX18(balance.amount);
-          }
-        }
-        return result;
+      if (!summary || !summary.exists) {
+        logger.info('Subaccount does not exist yet - need to make first deposit');
+        return { USDT0: 0 };
       }
       
-      // Fallback to direct API call
-      const response = await fetch(`https://api.nado.xyz/v1/subaccount/${subaccount}/balance`);
-      const data = await response.json();
-      return data;
+      // Convert to format expected by existing code
+      const balances = {};
+      
+      // Get USDT0 balance (product_id 0)
+      if (summary.health && summary.health.totalDeposited) {
+        balances.USDT0 = parseFloat(summary.health.totalDeposited);
+      } else {
+        balances.USDT0 = 0;
+      }
+      
+      return balances;
+      
     } catch (error) {
       logger.error('Failed to get balance:', error);
       return { USDT0: 0 }; // Return default to avoid crash
@@ -117,39 +100,38 @@ export class NadoClient {
   }
   
   async getPositions() {
-    const subaccount = this.getSubaccountId();
-    return await this.client.context.engineClient.getSubaccountInfo(subaccount);
+    try {
+      const summary = await this.client.subaccount.getSubaccountSummary('default');
+      return summary.positions || [];
+    } catch (error) {
+      logger.error('Failed to get positions:', error);
+      return [];
+    }
   }
   
   async getOrders() {
-    const subaccount = this.getSubaccountId();
-    const result = await this.client.context.engineClient.getOpenOrders(subaccount);
-    return result.orders || [];
+    try {
+      // SDK provides orders through market client
+      const orders = await this.client.market.getOpenOrders();
+      return orders || [];
+    } catch (error) {
+      logger.error('Failed to get orders:', error);
+      return [];
+    }
   }
   
   /**
    * Place order using official SDK
-   * @param {number} productId - Product ID
-   * @param {string} priceX18 - Price * 1e18 as string
-   * @param {string} amountX18 - Amount * 1e18 as string (negative for sell)
    */
   async placeOrder(productId, priceX18, amountX18) {
     try {
-      // Use SDK's market.placeOrder if available
-      if (this.client.market && this.client.market.placeOrder) {
-        const result = await this.client.market.placeOrder({
-          productId,
-          amount: BigInt(amountX18),
-          priceX18: BigInt(priceX18),
-          subaccount: this.getSubaccountId(),
-        });
-        
-        return result;
-      }
+      const result = await this.client.market.placeOrder({
+        productId,
+        amount: BigInt(amountX18),
+        priceX18: BigInt(priceX18),
+      });
       
-      // Fallback: log error and return null
-      logger.error('SDK market.placeOrder not available');
-      return null;
+      return result;
       
     } catch (error) {
       logger.error('Order placement failed:', error);
@@ -165,7 +147,6 @@ export class NadoClient {
       await this.client.market.cancelOrders({
         productIds: [productId],
         digests: [digest],
-        subaccount: this.getSubaccountId(),
       });
     } catch (error) {
       logger.error('Order cancellation failed:', error);
@@ -179,33 +160,25 @@ export class NadoClient {
   
   async connectWebSocket() {
     try {
-      // SDK handles WebSocket connections internally
-      // Check if SDK provides subscription methods
-      if (this.client.context && this.client.context.subscriptionClient) {
-        const subaccount = this.getSubaccountId();
-        
-        await this.client.context.subscriptionClient.subscribe({
-          type: 'order_update',
-          subaccount,
-        }, (data) => {
+      // SDK handles WebSocket internally
+      // Subscribe to order updates if available
+      if (this.client.subscriptions) {
+        await this.client.subscriptions.subscribeToOrders((data) => {
           this.handleOrderUpdate(data);
         });
-        
-        logger.info('WebSocket subscriptions established');
+        logger.info('✅ WebSocket subscriptions established');
       } else {
-        // SDK may handle WebSocket internally without explicit subscription
         logger.info('WebSocket handled by SDK internally');
       }
       
     } catch (error) {
       logger.error('WebSocket connection failed:', error);
-      // Don't throw - WebSocket may not be critical for basic functionality
+      // Don't throw - WebSocket may not be critical
       logger.info('Continuing without WebSocket subscriptions');
     }
   }
   
   handleOrderUpdate(data) {
-    // Convert SDK event format to internal format
     const eventType = 'order_update';
     const callbacks = this.subscriptions.get(eventType) || [];
     callbacks.forEach(cb => cb(data));
@@ -223,9 +196,8 @@ export class NadoClient {
   // ========================================
   
   getSubaccountId() {
-    // Generate subaccount ID from address and name
-    const subaccountName = config.nado.subaccount || 'default';
-    return `${this.address}:${subaccountName}`;
+    // SDK handles subaccount internally
+    return this.client.subaccount || 'default';
   }
   
   getAddress() {

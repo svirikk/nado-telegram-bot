@@ -67,7 +67,61 @@ export class NadoClient {
     return products.find(p => p.symbol === symbol);
   }
   
-  async getSubaccountBalance
+  async getSubaccountBalance() {
+    try {
+      // 1. Беремо назву з конфігу (залиш default, якщо в Nado написано default)
+      const subName = config.nado.subaccount || 'default';
+      
+      // 2. ВАЖЛИВО: Очищуємо адресу. Деякі версії SDK глючать, 
+      // якщо адреса приходить як об'єкт або має дивні символи.
+      const ownerAddress = String(this.address).toLowerCase().trim();
+
+      logger.info(`Checking balance for: ${ownerAddress} | Sub-ID: ${subName}`);
+
+      // 3. Виклик з явним приведенням типів
+      const summary = await this.client.subaccount.getSubaccountSummary({
+        owner: ownerAddress,
+        name: subName
+      });
+      
+      if (!summary || !summary.health) {
+        logger.info(`No data for subaccount "${subName}". Is deposit done?`);
+        return { USDT0: 0 };
+      }
+      
+      // Розрахунок балансу (враховуємо 18 знаків)
+      const rawBalance = summary.health.totalDeposited || 0;
+      const formattedBalance = Number(rawBalance) / 1e18;
+      
+      logger.info(`✅ Success! Nado Internal Balance: $${formattedBalance.toFixed(2)}`);
+      return { USDT0: formattedBalance };
+      
+    } catch (error) {
+      // Якщо знову вилетить "owner must be 20 bytes", спробуємо останній шанс:
+      if (error.message.includes('20 bytes')) {
+        logger.error('CRITICAL: SDK still rejects the address format.');
+        // Спробуй цей хак, якщо звичайний виклик не працює:
+        return this._backupGetBalance(); 
+      }
+      logger.error('Failed to get Nado balance:', error);
+      return { USDT0: 0 }; 
+    }
+  }
+
+  // Додай цей допоміжний метод нижче для "плану Б"
+  async _backupGetBalance() {
+    try {
+      // Деякі версії SDK автоматично беруть адресу з walletClient
+      // якщо викликати метод БЕЗ аргументів або тільки з name
+      const summary = await this.client.subaccount.getSubaccountSummary({
+        name: config.nado.subaccount || 'default'
+      });
+      const bal = summary?.health?.totalDeposited ? Number(summary.health.totalDeposited) / 1e18 : 0;
+      return { USDT0: bal };
+    } catch (e) {
+      return { USDT0: 0 };
+    }
+  }
   
   async getProductById(productId) {
     const products = await this.getProducts();

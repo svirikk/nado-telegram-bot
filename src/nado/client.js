@@ -1,5 +1,5 @@
 import { createNadoClient } from '@nadohq/client';
-import { createWalletClient, http } from 'viem';
+import { createWalletClient, http, toBytes } from 'viem'; // Додай toBytes сюди
 import { privateKeyToAccount } from 'viem/accounts';
 import { ink, inkSepolia } from 'viem/chains';
 import { config } from '../config.js';
@@ -71,56 +71,58 @@ export class NadoClient {
     try {
       if (!this.address) return { USDT0: 0 };
 
-      // ГЕК: Імпортуємо утиліту перетворення прямо всередині або на початку файлу
-      const { decodeHex } = await import('viem');
-
       const subName = config.nado.subaccount || 'default';
       
-      // ПОМИЛКА БУЛА ТУТ: SDK хоче бачити 20 байт, а не 42 символи тексту.
-      // Ми перетворюємо "0x5662..." на реальні 20 байт даних.
-      const ownerBuffer = decodeHex(this.address);
+      // Конвертуємо адресу в байтовий формат, який вимагає SDK
+      // toBytes перетворить "0x5662..." на Uint8Array(20)
+      const ownerBytes = toBytes(this.address);
 
-      logger.info(`Checking balance for: ${this.address} (Converted to 20 bytes)`);
+      logger.info(`Checking balance for: ${this.address}`);
 
       const summary = await this.client.subaccount.getSubaccountSummary({
-        owner: ownerBuffer, // ТЕПЕР ПЕРЕДАЄМО БАЙТИ
+        owner: ownerBytes, // Тепер тут гарантовано 20 байт
         name: subName
       });
       
       if (!summary || !summary.health) {
-        logger.info(`No summary for "${subName}". Check if you made a deposit in NADO interface.`);
+        logger.info(`Summary empty for "${subName}".`);
         return { USDT0: 0 };
       }
       
-      const balance = Number(summary.health.totalDeposited) / 1e18;
-      logger.info(`✅ Success! Balance: $${balance.toFixed(2)} USDT0`);
+      const rawBalance = summary.health.totalDeposited || 0;
+      const balance = Number(rawBalance) / 1e18;
       
+      logger.info(`✅ SUCCESS! Nado Balance: $${balance.toFixed(2)} USDT0`);
       return { USDT0: balance };
       
     } catch (error) {
-      logger.error('SDK Error details:', error);
-      
-      // ПЛАН "Б": Якщо SDK все одно тупить, ми витягнемо баланс через загальний список
+      // Якщо SDK все ще викидає помилку про 20 байт, ми спробуємо обійти її через "сирий" запит
+      logger.error('SDK Balance Error:', error.message);
       return this._lastResortBalance();
     }
   }
 
-  // Останній шанс: отримати всі субакаунти і знайти свій
   async _lastResortBalance() {
     try {
-      logger.info('Using Last Resort Method...');
+      logger.info('Attempting fallback: getSubaccounts list...');
+      // Отримуємо список усіх субакаунтів для цієї адреси
       const subaccounts = await this.client.subaccount.getSubaccounts(this.address);
-      const mySub = subaccounts.find(s => s.name === (config.nado.subaccount || 'default'));
       
-      if (mySub) {
+      if (subaccounts && subaccounts.length > 0) {
+        // Беремо перший ліпший, якщо 'default' не знайдено
+        const sub = subaccounts.find(s => s.name === (config.nado.subaccount || 'default')) || subaccounts[0];
+        logger.info(`Found subaccount: ${sub.name}`);
+        
+        // Викликаємо через внутрішній ID
         const summary = await this.client.subaccount.getSubaccountSummary({
-          owner: decodeHex(this.address),
-          name: mySub.name
+          owner: toBytes(this.address),
+          name: sub.name
         });
         return { USDT0: Number(summary.health.totalDeposited) / 1e18 };
       }
       return { USDT0: 0 };
     } catch (e) {
+      logger.error('Fallback failed too:', e.message);
       return { USDT0: 0 };
     }
   }

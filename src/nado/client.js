@@ -28,6 +28,7 @@ export class NadoClient {
       const chain = network === 'inkTestnet' ? inkSepolia : ink;
       
       logger.info(`Initializing Nado client on ${network}...`);
+      logger.info(`Using wallet address: ${this.address}`);
       
       // Create viem wallet client
       const walletClient = createWalletClient({
@@ -39,7 +40,7 @@ export class NadoClient {
       // Create Nado client using official SDK (only 2 parameters!)
       this.client = createNadoClient(network, walletClient);
       
-      logger.info(`✅ Nado client initialized (${network})`);
+      logger.info(`✅ Nado client initialized on ${network}`);
       
     } catch (error) {
       logger.error('Failed to initialize Nado client:', error);
@@ -68,8 +69,11 @@ export class NadoClient {
   
   async getSubaccountBalance() {
     try {
-      // Use SDK's subaccount.getSubaccountSummary
-      const summary = await this.client.subaccount.getSubaccountSummary('default');
+      // SDK needs owner address, not subaccount name
+      const summary = await this.client.subaccount.getSubaccountSummary({
+        owner: this.address,
+        name: 'default'
+      });
       
       if (!summary || !summary.exists) {
         logger.info('Subaccount does not exist yet - need to make first deposit');
@@ -101,7 +105,10 @@ export class NadoClient {
   
   async getPositions() {
     try {
-      const summary = await this.client.subaccount.getSubaccountSummary('default');
+      const summary = await this.client.subaccount.getSubaccountSummary({
+        owner: this.address,
+        name: 'default'
+      });
       return summary.positions || [];
     } catch (error) {
       logger.error('Failed to get positions:', error);

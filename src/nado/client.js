@@ -2,6 +2,7 @@ import { createNadoClient } from '@nadohq/client';
 import { createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arbitrum, arbitrumSepolia } from 'viem/chains';
+import { RpcProvider } from 'starknet';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 
@@ -34,9 +35,17 @@ export class NadoClient {
         transport: http(),
       });
       
-      // Create Nado client using official SDK
-      // SDK accepts only walletClient as second parameter
-      this.client = await createNadoClient(network, walletClient);
+      // Create StarkNet provider (required by SDK)
+      const starknetRpcUrl = network === 'testnet' 
+        ? 'https://starknet-sepolia.public.blastapi.io'
+        : 'https://starknet-mainnet.public.blastapi.io';
+      
+      const starknetProvider = new RpcProvider({ 
+        nodeUrl: starknetRpcUrl 
+      });
+      
+      // Create Nado client using official SDK with all 3 parameters
+      this.client = await createNadoClient(network, walletClient, starknetProvider);
       
       logger.info(`Nado client initialized (${network})`);
       

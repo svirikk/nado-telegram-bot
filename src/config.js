@@ -21,10 +21,8 @@ function parseBool(str, defaultValue) {
 }
 
 export const config = {
-  // Wallet - automatically add 0x prefix if missing
-  privateKey: getEnv('PRIVATE_KEY').startsWith('0x') 
-    ? getEnv('PRIVATE_KEY') 
-    : '0x' + getEnv('PRIVATE_KEY'),
+  // Wallet - use private key exactly as provided
+  privateKey: getEnv('PRIVATE_KEY'),
   
   // Telegram
   telegram: {
@@ -68,9 +66,19 @@ export const config = {
 };
 
 // Validate configuration
-const keyLength = config.privateKey.length;
-if (!config.privateKey.startsWith('0x') || (keyLength !== 66 && keyLength !== 64)) {
-  throw new Error(`PRIVATE_KEY invalid: expected 64 hex chars (or 66 with 0x), got ${keyLength} chars`);
+if (!config.privateKey) {
+  throw new Error('PRIVATE_KEY is required');
+}
+
+// Remove 0x prefix for validation if present
+const keyWithoutPrefix = config.privateKey.replace(/^0x/, '');
+if (keyWithoutPrefix.length !== 64) {
+  throw new Error(`PRIVATE_KEY invalid: expected 64 hex chars, got ${keyWithoutPrefix.length}`);
+}
+
+// Validate hex format
+if (!/^[0-9a-fA-F]{64}$/.test(keyWithoutPrefix)) {
+  throw new Error('PRIVATE_KEY must contain only hex characters (0-9, a-f, A-F)');
 }
 
 if (config.risk.riskPercent <= 0 || config.risk.riskPercent > 100) {
